@@ -1,1 +1,1 @@
-This paper formally introduces the [mcp package](https://github.com/lindeloev/mcp) for (Bayesian) regression with multiple change points.
+This paper formally introduces the [mcp package](https://github.com/lindeloev/mcp) for (Bayesian) regression with multiple change points. See citation info at the link or type `citation("mcp")` in your R console.

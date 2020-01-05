@@ -1,5 +1,5 @@
 ---
-title: "mcp: Regression with multiple change points"
+title: "mcp: An R Package for Regression With Multiple Change Points"
 author: "Jonas Kristoffer Lindeløv $^{1*}$"
 date: |
   $^1$ Department of Communication and Psychology, Aalborg University, Denmark.\break

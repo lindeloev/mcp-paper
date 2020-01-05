@@ -62,7 +62,7 @@ segments_binomial = list(
   ~ 1 + x
 )
 
-fit_binomial = mcp(segments_binomial, ex_binomial, family = binomial(), adapt = 4000)
+fit_binomial = mcp(segments_binomial, ex_binomial, family = binomial(), adapt = 7000)
 
 
 # Trigonometric / Seasonal
@@ -226,4 +226,5 @@ plot_plateaus + plot_variance + plot_ar +
   plot_layout(design = layout)
 
 ggsave("all_plots.png", type = "cairo", scale = 1, width = 7, height = 10)
+ggsave("all_plots_small.png", type = "cairo", scale = 1, width = 7, height = 10, dpi = 85)
 ```

@@ -37,7 +37,7 @@
 \IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
 \IfFileExists{bookmark.sty}{\usepackage{bookmark}}{\usepackage{hyperref}}
 \hypersetup{
-  pdftitle={mcp: Regression with multiple change points},
+  pdftitle={mcp: An R Package for Regression With Multiple Change Points},
   pdfauthor={Jonas Kristoffer Lindeløv \^{}\{1*\}},
   hidelinks,
 }
@@ -131,7 +131,7 @@
 \usepackage[]{natbib}
 \bibliographystyle{apalike}
 
-\title{mcp: Regression with multiple change points}
+\title{mcp: An R Package for Regression With Multiple Change Points}
 \author{Jonas Kristoffer Lindeløv \(^{1*}\)}
 \date{\(^1\) Department of Communication and Psychology, Aalborg University, Denmark.\break
 \(^*\) Corresponding author, Email: \href{mailto:lindeloev@gmail.com}{\nolinkurl{lindeloev@gmail.com}}}
@@ -187,14 +187,14 @@ The indicator function \([x_i > \Delta_{k-1}]\) evaluates to \(1\) if true and \
 X_{k,i} = \min\{x_i, \Delta_{k+1}\} - \Delta_{k}
 \end{equation}
 
-is the ``local'' \(x_i\) to segment \(k\). It is zero at the segment onset (at \(\Delta_k\)) and reaches a plateau at the segment's offset(at \(\Delta_{k+1}\)). This allows for the modeling of joined segments, handing over the function value like a baton to the next segment. See appendix 2 for the associated likelihood.
+is the ``local'' \(x_i\) to segment \(k + 1\). It is zero at the segment onset (at \(\Delta_k\)) and reaches a plateau at the segment's offset(at \(\Delta_{k+1}\)). This allows for the modeling of joined segments, handing over the function value like a baton to the next segment. See appendix 2 for the associated likelihood.
 
 \hypertarget{relative-absolute-and-segment-specific-models}{%
 \subsection{Relative, absolute, and segment-specific models}\label{relative-absolute-and-segment-specific-models}}
 
 Simple manipulations to this basic indicator scheme accommodates more flexible models.
 
-To model \emph{relative} changes in slopes from segment \(k-1\) to \(k\), simply replace \(\beta_{k, 1}\) with \(\beta_{k-1, 1} + \beta_{k, 1}\) so that \(\beta_{k, 1}\) is the \emph{change} in slope. To model \emph{absolute} intercepts in segment \(k\), simply multiply earlier segments with the additional indicator \([x_i < \Delta_k]\) which will ``turn them off'' because it evaluates to zero once \(x_i\) crosses into segment \(k\).
+To model \emph{relative} changes in slopes from segment \(k\) to \(k+1\), simply replace \(\beta_{k+1, 1}\) with \(\beta_{k, 1} + \beta_{k + 1, 1}\) so that \(\beta_{k + 1, 1}\) is the \emph{change} in slope. To model \emph{absolute} intercepts in segment \(k + 1\), simply multiply earlier segments with the additional indicator \([x_i < \Delta_k]\) which will ``turn them off'' because it evaluates to zero once \(x_i\) crosses into segment \(k + 1\).
 
 Various functions can be applied to \(\mathbf{x}\). For example, quadratic trends can be added with \(\beta_{k, i} \cdot X_{k,i}^2\), logarithms with \(\beta_{k, i} \cdot \log(X_{k,i})\), and so forth for exponents, trigonometric functions, etc.
 
