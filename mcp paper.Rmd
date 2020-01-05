@@ -1,0 +1,524 @@
+---
+title: "mcp: Regression with multiple change points"
+author: "Jonas Kristoffer Lindeløv $^{1*}$"
+date: |
+  $^1$ Department of Communication and Psychology, Aalborg University, Denmark.\break
+  $^*$ Corresponding author, Email: lindeloev@gmail.com
+url: https://github.com/lindeloev/mcp
+abstract: |
+  The R package mcp does flexible and informed Bayesian regression with change points. mcp can infer changes in means, variances, autocorrelation structure, and any combination of these. Regression models can be specified on a segment-by-segment basis, including regression on variance and autoregressive parameters. Prior and posterior samples and summaries are returned for all parameters as well as a rich set of plotting options. Bayes Factors can be computed via Savage-Dickey density ratio and posterior contrasts. Cross-validation can be used for a more general model comparison. mcp ships with sensible defaults, including priors, but many options for the user to take control of these settings. The strengths and limitations of mcp are discussed in relation to existing change point packages in R.
+  \linebreak\linebreak
+  Keywords: change point, piecewise linear, break point, regression, R, Bayesian
+lang: en-US
+class: man
+figsintext: true
+numbersections: true
+encoding: UTF-8
+bibliography: mcp-paper
+biblio-style: apalike
+output:
+  bookdown::pdf_document2:
+     citation_package: natbib
+     keep_tex: true
+     toc: false
+header-includes:
+   - \usepackage{amsmath}
+   - \usepackage[utf8]{inputenc}
+   - \usepackage[T1]{fontenc}
+   - \usepackage{setspace}
+   - \onehalfspacing
+   - \newcommand\numberthis{\addtocounter{equation}{1}\tag{\theequation}}
+editor_options: 
+  chunk_output_type: console
+---
+
+# Introduction
+
+A change point is a location on a continuum where a trend changes. Change point analyses are useful for detecting when a change happens in the rate of disasters due to new policies or practices [@raftery1986], changes in stock prices [@chen1997a], discontinuities in human performance [@cowan2000], and many other scenarios. The widespread applicability of change point analysis is evident from its many names: switch points, break points, broken line, broken stick, (performance) discontinuity models, bilinear regression, piecewise regression, local linear regression, and segmented regression.
+
+More than 10 R packages are available to analyze change points. Most packages detect change points using a threshold, including `ecp` [@james2015], `bcp` [@erdman2007], `changepoint` [@killick2014], `changepoint.np` [@haynes2019], `TSMCP` [@li2018], `cpm` [@ross2015], `EnvCpt` [@killick2018], and `wbsts` [@korkas2018]. This is useful when the number of change points is unknown a priori. They return point estimates of the change points as their only output. Other packages take a fixed number of change points and a user-specified regression model, with the restriction that the same regression model must apply to all segments, including `segmented` [@muggeo2008] and `strucchange::breakpoints()` [@zeileis2003]. A limited number of regression models are supported in the latter packages.
+
+However, there are many cases where it is desirable to specify the regression models on a per-segment basis. More generally, the analyst will often have a priori knowledge about the number of change points and credible parameter values. For example, human short-term memory capacity can be modeled as a performance discontinuity in accuracy as a function of task difficulty [@cowan2000; @camos2008; @leibovich-raveh2018]. Performance is fast and virtually errorless for easy tasks (a high plateau), but there is an abrupt change to deteriorating accuracy (joined negative slope) when task difficulty exceeds the participant's abilities. Identification of the memory capacity has classically been done by eye-balling graphs or coming up with ad-hoc methods to automate this [@leibovich-raveh2018]. Similarly, the effects of many nutrients follow a positive quadratic trend with an exponent between 0 and 1, followed by a plateau at a saturation point [@pesti2009]. 
+
+In these cases, the number of change points is known, there are a priori bounds on the sign of the coefficients, and all parameters of the model are of interest - not just the change point. There may also be classical regression problems where change points are nuisance effects that need to be co-varied out, so detailed information and tests for *all* parameters (again, not just the change points) can also be useful. `mcp` aims to full in the missing piece in the R landscape by being useful for all of these purposes. More generally, `mcp` aims to do GLMM regression with multiple change points that change between user-specified GLMM segments, thus providing maximum modeling flexibility. `mcp` takes a Bayesian computational approach and, as we shall see, this has the added benefit of properly quantifying uncertainty around the change points - a seemingly impossible task for non-computational methods.
+
+Part 1 of this paper introduces the regression model(s) underlying `mcp`. Part 2 discusses priors for change point models. Part 3 demonstrates the usage of `mcp` and it's features. Part 4 discusses the strengths and limitations of `mcp` in general, and in comparison to the other change point packages in R.
+
+
+
+# An indicator model of multiple change points
+## From if-else to indicators
+Let $\Delta$ be a location on the continuous scale $\mathbf{x}$ where the prediction $\mu_i$ of $y_i$ changes from following function $f_1(\mathbf{x}|\mathbf{\beta_1})$ to $f_2(\mathbf{x|\mathbf{\beta_2}})$ where $\mathbf{\beta}$ are regression coefficients. An often-used formalization of a single change point (see e.g. [@stephens1994; @carlin1992]) is: 
+
+\begin{equation}
+\label{eq-ifelse}
+\mu_i = \begin{cases}
+      f_1(x_i | \mathbf{\beta_1}) & \text{if}\ x_i < \Delta \\
+      f_2(x_i | \mathbf{\beta_2}) & \text{if}\ x_i > \Delta \\
+    \end{cases}
+\end{equation}
+
+Each function $f$ takes the coefficients $\mathbf{\beta}$. For example, a linear segments is $f_k(x_i |  \mathbf{\beta_k}) = \beta_{k, 0} + \beta_{k, 1} \cdot x_i$. However, formulation (\ref{eq-ifelse}) does not readily generalize to $K$ segments, i.e., $K-1$ change points. In addition, time-series and other change point models are often joined at the change points, so a cumulative formulation would be desirable. The core novelty of `mcp` is to use an indicator formulation to achieve these goals:
+
+\begin{equation}
+\label{eq-indicator}
+\mu_i = \sum_{k=1}^{K} [x_i > \Delta_{k-1}]  f_k(X_{k, i} | \mathbf{\beta_k})
+\end{equation}
+
+The indicator function $[x_i > \Delta_{k-1}]$ evaluates to $1$ if true and $0$ if false [@knuth1992]. That is, for a given `x_i`, the parameters of the current and previous segments predict $\mu_i$ while future segments are multiplied by zero. The indicator can be ignored for the first segment ($k = 1$, corresponding to setting $\Delta_0 = -\infty$) or, as `mcp` defaults to, the change point can be restricted to the observed range of $\mathbf{x}$ by setting $\Delta_0 = \min(\mathbf{x})$. Also,
+
+\begin{equation}
+\label{eq-localx}
+X_{k,i} = \min\{x_i, \Delta_{k+1}\} - \Delta_{k}
+\end{equation}
+
+is the "local" $x_i$ to segment $k + 1$. It is zero at the segment onset (at $\Delta_k$) and reaches a plateau at the segment's offset(at $\Delta_{k+1}$). This allows for the modeling of joined segments, handing over the function value like a baton to the next segment. See appendix 2 for the associated likelihood.
+
+## Relative, absolute, and segment-specific models
+Simple manipulations to this basic indicator scheme accommodates more flexible models.
+
+To model *relative* changes in slopes from segment $k$ to $k+1$, simply replace $\beta_{k+1, 1}$ with $\beta_{k, 1} + \beta_{k + 1, 1}$ so that $\beta_{k + 1, 1}$ is the *change* in slope. To model *absolute* intercepts in segment $k + 1$, simply multiply earlier segments with the additional indicator $[x_i < \Delta_k]$ which will "turn them off" because it evaluates to zero once $x_i$ crosses into segment $k + 1$.
+
+Various functions can be applied to $\mathbf{x}$. For example, quadratic trends can be added with $\beta_{k, i} \cdot X_{k,i}^2$, logarithms with $\beta_{k, i} \cdot \log(X_{k,i})$, and so forth for exponents, trigonometric functions, etc.
+
+We can arbitrarily add or omit terms in any one segment by writing out (\ref{eq-indicator}) and adding/removing individual terms. For example, (\ref{eq-model}) is a plateau followed by a joined slope followed by a quadratic trend starting at an absolute intercept:
+
+\begin{equation}
+\label{eq-model}
+\begin{aligned}
+X_{2, i} & = \min\{x_i, \Delta_2\} - \Delta_1 \\
+X_{3, i} & = \min\{x_i, \Delta_3\} - \Delta_2 \\
+\mu_i & =  [x_i > \Delta_0] [x_i < \Delta_2] \beta_{1, 0} + \\
+         & [x_i > \Delta_1] [x_i < \Delta_2] \beta_{2, 1} X_{2, i} + \\
+         & [x_i > \Delta_2] (\beta_{3, 0} + \beta_{3, 1} X_{3, i}^2)
+\end{aligned}
+\end{equation}
+
+This model is used as an example throughout this paper. It is visualized in Figure \@ref(fig:fitpostprior)). 
+
+We can easily share $\mathbf{\beta}$s between segments. For example, setting $\beta_{3,0} = \beta_{1,0}$ models identical intercepts in segments 1 and 3. This can be used to model, e.g., a change in intercept while keeping a slope identical between segments.
+
+
+## Generalized linear model
+While classic regression takes a Gaussian response family and an identity link function, change points can be modeled for all response families and link functions. For example:
+
+
+\begin{equation}
+\begin{aligned}
+y_i & \sim {\rm Normal}(\mu_i, \sigma) \\
+y_i & \sim {\rm Binomial}(n_i, {\rm logit}^{-1}(\mu_i)) \\
+y_i & \sim {\rm Poisson}({\rm exp}(\mu_i))
+\end{aligned}
+\end{equation}
+
+where $\sigma$ is the standard deviation of the residuals and $n_i$ is the number of trials for observation $y_i$.
+
+
+## Variance and autocorrelation change points {#sigmaar-api}
+Hitherto, we have discussed modeling changes in the central tendency, $\mu$. Another frequent application is modeling changes in variance. Existing R packages for variance change points models a change from one variance to another, i.e., an intercept change in variance. However, we can model $\sigma_i$ as a function of $x_i$ using the same regression model as that for $\mu_i$ above. For a change between two segments with different (absolute) means and variances, we have:
+
+
+\begin{equation}
+\begin{aligned}
+\mu_i = & [x_i > \Delta_0] [x_i < \Delta_1] \beta_{1, 0} + \\
+      & [x_i > \Delta_1] \beta_{2, 0} \\
+\sigma_i = & [x_i > \Delta_0] [x_i < \Delta_1] \theta_{1, 0} + \\
+           & [x_i > \Delta_1] \theta_{2, 0} \\
+y_i \sim & {\rm Normal}(\mu_i, \sigma_i)
+\end{aligned}
+\end{equation}
+
+where, again, $\Delta_0 = -\infty$ or $\Delta_0 = \min(\mathbf{x})$. This means that we can easily model slopes on $\sigma_i$ as well as periodic (sine and cosine), quadratic, and other functions.
+
+Change point analysis is also frequently applied to time-series where the autocorrelation can be accounted for using Nth-order autoregressive parameters. In the context of regression, they apply to the residuals on the link scale ($g(y_i) - \mu_i$) predicting residual $i$ as a slope on residual $i-N$ for each N:
+
+\begin{equation}
+\begin{aligned}
+  \epsilon_i & = \sum_{k=1}^{N} \phi_N(g(y_{i-N}) - \mu_{i-N}) \\
+  y_i & = {\rm Normal}(\mu_i + \epsilon_i, \sigma_i)
+\end{aligned}
+\end{equation}
+
+We can subject each $\phi_N$ to the same regression as we did for $\mu$ and $\sigma$, making it a target for change points and flexible modeling. For AR(N) models, any variance parameter, $\sigma$, now represents the *innovations*, i.e., the variance not accounted for by $\epsilon_i$.
+
+
+## Varying change points
+The change point parameter(s) can be subjected to regression too. However, this is more involved because their property of defining a location on $\mathbf{x}$ raises the requirement that all of $\mathbf{x}$ (and the associated $\mathbf{y}$) must be observed for each level of the regressors. As of v. 0.2.0, `mcp` supports by-group deviances ("random intercepts") from the change points ("fixed effects"). `mcp` implements a hierarchical model where the deviation for group $k$ from the population-level change point, $\Delta_k$, is sampled from a normal distribution with mean, $\Delta_k$, and a dispersion parameter $\varsigma_k$:
+
+\begin{equation}
+\delta_{k, j} \sim {\rm Normal}(\Delta_k, \varsigma_k)
+\end{equation}
+
+and the indicator in used to model the varying effect relative to change point, $\Delta_k$, in (\ref{eq-indicator}) and (\ref{eq-model}) becomes
+
+\begin{equation}
+[x_i > \delta_{k, j}]
+\end{equation}
+
+While varying effects are often used to "covary out" nuisance factors, varying change points are useful for estimating, e.g., individual differences in memory capacity or other human performance discontinuities [@lindelov2018]. Modeling the data from all participants in one model increases the precision of the individual parameters over conventional per-participant analyses [@leibovich-raveh2018; kruschke2018].
+
+
+## An R formula interface {#segments_api}
+R [@rcoreteam2019] provides a compact syntax to specify regression models. The coefficients are implicit so that `y ~ 1 + x` means $y_i = \beta_01 + \beta_1x_i$. Python too has begun adopting this syntax via the `patsy` module.
+
+Given a dataset with the response column `y` and the predictor column `x`, you can specify model (\ref{eq-model}) as a list of formulas:
+
+```{r}
+model = list(
+  y ~ 1,        # Plateau
+    ~ 0 + x,      # Joined slope
+    ~ 1 + I(x^2)  # Disjoined quadratic
+)
+```
+
+The coefficients in the three formulas are estimated as are the two change points that define their boundaries. See a fit based on this model in Figure \@ref(fig:fitpostprior). 
+
+With `lme4`, the syntax `y ~ \ldots + (formula|group)` was added for mixed models [@bates2015]. `brms` has extended the syntax to include missing values (`mi(x)`), monotonic effects (`mo(x)`), and many others [@burkner2017]. The `mcp` model specification builds on this tradition: You can infer changes in the variance using `sigma(formula)` terms. The following would apply the same regression model to the variance that the model above did for the mean:
+
+```{r, eval=FALSE}
+model = list(
+  y ~ 1 + sigma(1),       # Plateau
+    ~ 0 + sigma(0 + x),     # Joined slope
+    ~ 0 + sigma(1 + I(x^2)) # Disjoined quadratic
+)
+```
+
+AR(N) take the format `ar(order, formula)` where `formula` defaults to an intercept (`1`). So adding `ar(2)` to a segment would model 2nd order autoregressive residuals for that segment and later segments, until otherwise specified.
+
+The left-hand side of segment 2+ specifies the change point. It defaults to an intercept, i.e., an "intercept change point". For example, `~ x` is interpreted as `1 ~ x`. You can let a change point intercept vary by a categorical predictor. For example, the following models varying-by-id change points from a plateau to a joined slope where all other parameters are shared:
+
+```{r, eval=FALSE}
+model = list(
+  y ~ 1,              # Plateau
+  1 + (1|id) ~ 0 + x  # Joined slope at cp_1 + delta_{1, id}
+)
+```
+
+These expressions can be combined to characterize a given change point as a change in the mean, variance, autoregression, and varying effect all at once (see an example in Figure \@ref(fig:allmodels)).
+
+The response family, the link function, and the prior is specified in the call to `mcp::mcp()`. For example, the model above can be fitted using Gaussian residuals (the default), Poisson, Binomial, or Bernoulli:
+
+
+```{r, eval = FALSE}
+fit_gauss = mcp(model, data)  # Defaults to gaussian()
+fit_poiss = mcp(model, data, family = poisson(link = "log"))
+```
+
+Examples of these modeling options are visualized in Figure \@ref(fig:allmodels).
+
+
+
+# Priors
+
+## Default priors for change points
+Uninformative priors are assigned to all parameters in the absence of user-provided priors. The default priors should be suitable for estimation in the absence of strong prior knowledge. While setting priors for intercepts, slopes, etc. follow the same principles as other (non-change-point) regression problems, setting priors for the change points presents a challenge of its own. Due to the non-interchangeable segment order in `mcp`, the prior for the change points should be ordered monotonically in the observed range ($\min(\mathbf{x}) < \Delta_1 < \Delta_2 < \ldots < \Delta_K < \max(\mathbf{x})$) while otherwise remaining as uninformative as possible.
+
+The ideal would probably be [the Dirichlet prior](#dirichlet) described below and hence it will be described first. However, it samples 10-100 fold less efficiently than many other priors, so `mcp` defaults to using an approximation called [the "t-tail" prior](#t-tail). The Dirichlet and the t-tail prior is visualized for $K = 2$ and $K = 5$ in Figure \@ref(fig:defaultpriors).
+
+
+(ref:defaultpriors) Dirichlet and t-tail priors for two and five change points respectively. Here shown on data where $\min(\mathbf{x}) = 50$ and $\max(\mathbf{x}) = 150$. Both priors are flat at $K = 1$. As $K$ increase, so does the informativeness of the prior for any given change point.
+```{r defaultpriors, echo = FALSE, fig.cap="(ref:defaultpriors)"}
+knitr::include_graphics("../mcp/docs/articles/priors_files/figure-html/unnamed-chunk-8-1.png")
+```
+
+
+### Dirichlet prior {#dirichlet}
+`mcp` supports a scaled and shifted Dirichlet prior on the difference between change points - an approach that is also used to model monotonic effects in brms [@burkner2018]. The Dirichlet is itself a simplex: $\Delta_i > 0$ ensures ordering and $\sum_{k=1}^K \Delta_i = 1$ so that it can be shifted and scaled to the observed range. Furthermore, the sum of the probability density functions (PDFs) is ${\rm Uniform}(0, 1)$ (or ${\rm Beta}(1,1)$), meaning that it represents equal prior credence that a change occurs at any point in the interval [0, 1]. The Dirichlet prior is scaled to the observed range of $\mathbf{x}$ using $\Delta_k = \min(\mathbf{x}) + (\max(\mathbf{x}) - \min(\mathbf{x})) \Delta_{dirich_k}$.
+
+The resulting PDFs for the individual change points are Beta distributions. Specifically, if all $\alpha_k = 1$ the marginal priors are $\Delta_k \sim {\rm Beta}(k, K + 1 - k)$ before scaling (see appendix for more details). When there is just one change point, this simplifies to $\Delta_1 \sim {\rm Beta}(1, 1)$, i.e., a uniform prior in the observed range. 
+
+To illustrate, the marginal PDFs for a five-change points model are visualized in figure \@ref(fig:defaultpriors). An axis for an example data scale is added when $\min(\mathbf{x}) = 50$ and $\max(\mathbf{x}) = 150$.
+
+### t-tail prior {#t-tail}
+For models with one change point ($K = 1$), the default prior is simply
+
+\begin{equation}
+\Delta_1 \sim {\rm Uniform}(\min(\mathbf{x}), \max(\mathbf{x}))
+\end{equation}
+
+which is identical to the Dirichlet prior for $K = 1$. For models with $K > 1$ a "t-tail" prior is the default for all change points. It (a) yields posteriors that are virtually identical to the Dirichlet, (b) has good sampling efficiency, and (c) is reasonably uninformative. 
+
+The t-tail prior is a series of t-distributions where ordering is imposed via left-truncation, i.e., leaving just the tails:
+
+\begin{equation}
+\Delta_k \sim t(\mu = 0, \sigma = \frac{1}{K}, \nu = K-1), \Delta_k \in (\Delta_{k-1}, 1)
+\end{equation}
+
+before scaling and $\Delta_0 = 0$. As $K$ increases, the degrees of freedoms $\nu$ increase and the variance $\sigma$ decreases to narrow the priors in a way that keeps the sum of the densities approximately flat. After shifting to start at $\min(\mathbf{x})$ and scaling to the range $\max(\mathbf{x}) - \min(\mathbf{x})$, we get
+
+\begin{equation}
+\Delta_k \sim t(\min(\mathbf{x}), \frac{\max(\mathbf{x}) - \min(\mathbf{x})}{K}, K-1), \Delta_k \in (\Delta_{k-1}, \max(\mathbf{x}))
+\end{equation}
+
+where $\Delta_0 = \min(\mathbf{x})$. While the t-distribution "base" is identical for all $\Delta_k$, the cumulative left-truncation(s) imposes a conditionality that make them differ. $\Delta_1$ is a half-t while $\Delta_{2+}$ are t-tails.
+
+
+### Priors for varying effects
+The default prior for varying change points are normals that are truncated to lie between the two adjacent change points, i.e., $\Delta_{k-1} < \delta_{k, j} < \Delta_{k + 1}$.
+
+
+
+## Default priors for other coefficients
+The default priors for intercepts and slopes in Gaussian families are normals that are vaguely based on data to ensure that they remain uninformative across any order of magnitude. They mimic the priors used in `brms` [@burkner2017].
+
+<!-- How to formally separate modeled y from observed y? -->
+
+For Gaussian families, the prior for the intercept is $t(0, 3* {\rm sd}(y), 3)$ and the prior for the slope is $t(0, {\rm sd}(y) / (\max(\mathbf{x}) - \min(\mathbf{x})), 3)$, i.e., a proportional *change* over the observed range of $\mathbf{x}$. The prior for $\sigma_1$s is $\mathcal{N}(0, {\rm sd}(y))$ truncated to positive values. A ${\rm Uniform}(-1, 1)$ prior is used on autoregressive coefficients to ensure stationarity [@fuller1981]. $\mathcal{N}(0, 10)$ is used for Poisson intercepts and slopes reflecting an expected value of 1 and a 68.3% prior credence counts between ${\rm exp}(-10) = 1 / 22026$ and ${\rm exp}(10) = 22026$ and likewise for the total *change* in counts over the observed range of $\mathbf{x}$. A $\mathcal{N}(0, 3)$ is used for Bernoulli and binomial intercepts on a logit scale reflecting 68.3% prior credence in probabilities between 4.7% and 95.3%, and $\mathcal{N}(0, 3 / (\max(\mathbf{x}) - \min(\mathbf{x}))$ for slopes reflecting similar prior credence for the *change* in probabilities over the observed $\mathbf{x}$.
+
+
+## Setting and using priors {#priors_api}
+Users can specify priors using named lists. The names are the parameter names and the values are JAGS code. Consider this:
+
+```{r}
+prior = list(
+  cp_1 = "dunif(10, 50)",
+  x_2 = "dnorm(0, 3) T(0, )",
+  int_3 = "int_1"
+)
+```
+
+Here, the first change point `cp_1` is restricted to lie in the interval [10, 50] with uniform probability. The slope on $\mathbf{x}$ in segment 2 (`x_2`) is a positive half-normal. The intercept in segment 3 (`int_3`) is shared with the intercept in segment 1 and they are modeled as one parameter. You can also set constants using e.g., `int_3 = 20` so `int_3` will not be inferred. The two latter priors are true priors: they express a 100% belief in the identity and the value respectively.
+
+A priori knowledge about more likely change point locations can be specified by setting $\alpha_k > 1$ for one or several change points, e.g., `cp_2 = "dirichlet(2)"`. Uniform priors and truncation can be used to exclude modeling change points for certain $\mathbf{x}$, e.g., `prior = list(cp_1 = "dunif(20, 50)", cp_2 = "dnorm(80, 30) T(cp_1 + 10, MAXX)")`. When no truncation is specified on change points by the user, `mcp` adds the order restriction (`T(cp_i-1, MAXX)`).
+
+
+
+
+# Using mcp
+The [mcp website](http://lindeloev.github.io/mcp/) contains numerous worked examples for all `mcp` features. Here is a simple example that follows a procedure which scales well from simple to complex inference problems.
+
+First, specify a model as a list of formulas. For now, we use [the previously discussed three-segment model](#segments_api).
+
+
+## Simulate data {#simulate}
+Second, simulate data to evaluate the model's performance. `mcp` can simulate data for all supported models, including regression on variance and autocorrelation terms. Start by instantiating an `mcpfit` S3 class without sampling. This object contains all model information, including a `simulate()` function to simulate data for this model given coefficient values.
+
+Here we simulate 50 data points from some illustrative coefficients. The simulated data is visualized in figure \@ref(fig:fitpostprior).
+
+```{r}
+# Set up
+library(mcp)
+options(mc.cores = 3)
+
+# Get mcpfit object without sampling
+empty = mcp(model, sample = FALSE)
+
+# Simulate data
+set.seed(42)
+df = data.frame(x = 1:50)  # x_i
+df$y = empty$simulate(     # associated y_i
+  x = df$x,
+  cp_1 = 12, cp_2 = 30,
+  int_1 = 5, int_3 = 5,
+  x_2 = 0.5, x_3_E2 = -0.005,
+  sigma_1 = 2
+)
+```
+
+
+
+## Set priors and inspect the prior predictive
+Using the priors discussed in ["Setting and using priors"](#priors_api), we can sample the prior and do a prior predictive check that the priors jointly covers a reasonable region - not too narrow and not too wide [@conn2018] (see figure \@ref(fig:fitpostprior)).
+
+```{r, cache=TRUE, results=FALSE, warning=FALSE, message=FALSE}
+fit_prior = mcp(model, data = df, prior = prior, sample = "prior")
+print(fit_prior$prior)
+```
+
+
+## Results and interpretation
+When you are satisfied with your model and priors, fit it to the simulated data to learn whether the parameters can be recovered. For the present example, we instruct `mcp()` to sample both the prior and the posterior (`sample = "both"`) because we will need the prior to compute a Savage-Dickey Density Ratio later. `mcp()` defaults to sampling the posterior only.
+
+```{r, cache=TRUE, results=FALSE, warning=FALSE, message=FALSE}
+fit = mcp(model, data = df, prior = prior, sample = "both")
+```
+
+The `plot()` function visualizes the inferred model (see Figure \@ref(fig:fitpostprior). Fitted and/or predictive quantiles of the highest-density region can be added as well, defaulting to 95% intervals.
+
+
+(ref:fitpostprior) Prior predictive and posterior fits pertaining to the model specified in [this section](#segments_api) (see also (\ref{eq-model})), plotted using `plot()`. **Left:** Raw data (points, simulated in the main text) with 25 draws from the joint posterior (grey lines) and 95% highest density interval (dashed red lines). Posterior distributions of the change points are shown in blue - one line for each chain. **Right:** The same as left, but for prior samples and with a 60% prediction interval (green lines). Note that the uniform prior on the first change point was set manually in [the section on the prior API](#priors_api) and is not an mcp default.
+
+```{r fitpostprior, fig.cap="(ref:fitpostprior)"}
+library(ggplot2)
+plot(fit, q_fit = TRUE) + 
+  ggtitle("Posterior fit") +
+  
+plot(fit_prior, lines = 0, prior = TRUE, q_predict = c(0.2, 0.8)) + 
+  ggtitle("Prior predictive")
+```
+
+
+`summary()` summarises the posterior means and the highest density intervals for each parameter. When the data are simulated, the values used for simulation are included as well to ease model evaluation (columns `sim` and `match` which is "OK" if `lower < sim < upper`). We see that all parameters were well recovered. The summary includes diagnostics of the MCMC sampling as well. A Gelman-Rubin convergence diagnostic below 1.1 is usually taken as a good indication that the MCMC chains have converged well [@gelman1992]. The effective sample size expresses the amount of information that the MCMC chains carry for each parameter [@martino2017]. It is inversely related to the MCMC autocorrelation. These diagnostics are computed using the `coda` package [@plummer2006].
+
+```{r}
+summary(fit)
+```
+
+While `plot()` visualizes the whole model, `plot_pars()` visualizes individual parameters. The default plot includes a posterior density overlay with one curve for each chain, and a trace plot to inspect convergence history and mixing. Under the hood, this leverages the `bayesplot` package [@gabry2019] and supports many different plot types.
+
+Notice how the change point posteriors do not conform to any readily known distribution, highlighting the need for a computation approach. This propagates to parameters of the following segment(s) as can be seen in the joint distribution between the change point to the second segment and its slope (see \@ref(fig:pars)).
+
+```{r pars, out.width = "100%", fig.cap="(ref:pars)"}
+plot_pars(fit, pars = c("cp_1", "cp_2", "x_2")) + 
+  plot_pars(fit, pars = c("cp_1", "x_2"), type = "hex")
+```
+
+(ref:pars) **Left:** Posteriors and trace plots for some selected individual parameters (rows) and three chains (colors) of the model from [the section on the model API](#segments_api) (see also Figure \@ref(fig:fitpostprior)). The mixing and convergence is satisfactory here, as also indicated in the summary in the main text. **Right:** A joint density plot for the first change point and the slope in the following segment. These plots are the output of `plot_pars()`. The change point posteriors rarely conform to well-known distributions. Note that the posteriors were also plotted in Figure \@ref(fig:fitpostprior).
+
+
+
+## Testing parameter values
+<!-- Check/update these numbers before submitting -->
+Hypotheses about parameter values can be tested with the `hypothesis()` function which is heavily inspired by the corresponding function in `brms` [@burkner2017].
+
+The Savage-Dickey density ratio is the ratio of the prior and posterior density at a particular value and corresponds to a point Bayes Factor [@verdinelli1995]. Point Bayes Factors are as much an expression of the prior as the posterior, so careful specification of the prior is warranted.
+
+In the current example, we may want to test whether $x_2 = 0.5$, i.e., corresponding to a one-sample t-test. We can do this using a Savage-Dickey test. The Savage-Dickey density ratio is the ratio of the prior and posterior density at a particular value, and corresponds to a point Bayes Factor [@verdinelli1995]. Point Bayes Factors are as much an expression of the prior as the posterior, so careful specification of the prior is warranted.
+
+The output includes the estimate of the deviance from the hypothesis. It also includes `p` and `BF` will express the evidence *in favor* of the specified hypothesis. The inverse (i.e., $1 - p$ and $1 / BF$) would then be the evidence in favor of the alternative. The Savage-Dickey test yields around $BF = 6$ strengthening the belief in this point hypothesis by a factor of around 6 relative to the prior belief.
+
+Directional hypotheses operate entirely on the posterior, comparing the proportion of posterior density (number of MCMC samples) above or below a particular value. This can be exploited to test interval hypotheses like ROPE [@kruschke2011], e.g., whether $x\_2 \in [0.2, 0.8]$. Here, the Bayes Factor is around $BF = 2.5$.
+
+Hypotheses can also concern relationships between parameters, e.g., akin to two-sample t-tests. For example, we can test whether $\Delta_1 < \Delta_2 / 2$. The evidence seems to favor the alternative hypothesis by a factor of around $1 / 0.25 = 4$.
+
+Since the values of the model's 7 parameters were inferred from just 50 data points, the likelihoods (and hence the posteriors) are relatively wide. They will tend to narrow with larger sample sizes resulting in more extreme (Savage-Dickey) Bayes Factors.
+
+```{r, eval=FALSE}
+hypothesis(fit, c("x_2 = 0.5", 
+                  "x_2 > 0.2 & x_2 < 0.8",
+                  "cp_1 < cp_2 / 2"))
+```
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+stuff = hypothesis(fit, c("x_2 = 0.5", 
+                  "x_2 > 0.2 & x_2 < 0.8",
+                  "cp_1 < cp_2 / 2"))
+dplyr::mutate_if(stuff, is.numeric, round, digits = 2)  # Display nicely
+```
+
+
+
+## Model comparison
+`mcp` supports model comparison via cross-validation via the `loo` package [@vehtari2017], i.e., by comparing the out-of-sample predictive accuracy of models. Continuing our example, we can test the very existence of the first change point by comparing it to a null model where the first two segments are collapsed into one linear segment.
+
+Briefly, `loo` sums the log-density of the posterior predictive a data point when the model is fitted on the remaining data points. This is repeated for all data points. Summing log-densities corresponds to multiplying the actual predictive densities. The Estimated Log-Predictive Density (ELPD) indicates how well the model predicts out-of-sample data. One would favor a model to the degree that it has superior predictive performance (greater ELPD) and the column `elpd_diff` shows this difference [@vehtari2017; @gelman2013b]. Like any model comparison approach, Bayesian cross-validation is often useful but there are (edge) cases where the predictive performance of a model is underestimated [@gronau2019a]. Hopefully, future versions of `mcp` will include more options for model comparison, e.g., via the `bridgesampling` package [@gronau2018], so that convergence between multiple methods can bolster inferential conclusions.
+
+Here, the existence of the change point is favored over the null model but only weakly. Again, as the number of observed samples increase, the out-of-sample predictive performance of the models will be better discriminable.
+
+```{r, cache = TRUE, results=FALSE, warning=FALSE, message=FALSE}
+# Define the null model
+model_null = list(
+  y ~ 1 + x,      # One linear segment
+    ~ 1 + I(x^2)  # Disjoined quadratic
+)
+prior = list(x_1 = "dnorm(0, 3) T(0, )", int_2 = "int_1")  # Same prior
+
+# Sample it
+fit_null = mcp(model_null, data = df, prior = prior)
+```
+
+```{r, cache = TRUE, warning=FALSE}
+# Compute loos and compare
+fit$loo = loo(fit)
+fit_null$loo = loo(fit_null)
+loo::loo_compare(fit$loo, fit_null$loo)  # Can take more loos
+```
+
+
+## Apply to real data
+The previous steps served to crystallize an analysis plan. For confirmatory research, it is recommended to pre-register the analysis plan and the associated code at this point [@munafo2017]. Running the analysis on actual data is then merely a matter of "plugging it in" and running the analyses.
+
+
+
+(ref:allmodels) Some example mcp models with data (black dots), 25 posterior draws (grey lines), change point posteriors (blue densities), 95% fit intervals (red dashed lines), and 95% prediction intervals (green dashed lines). All plots were made with `plot()` and the data was simulated using the `simulate()` function. Other capabilities of `mcp` include Poisson regression and regression on `sigma()`/`ar()` ([see the section on this API](#sigmaar-api)).
+```{r allmodels, echo = FALSE, fig.cap="(ref:allmodels)"}
+knitr::include_graphics("all_plots.png", dpi = 375)
+```
+
+
+# Strengths and limitations {#compare_packages}
+## Inferring change points and a note on intervals
+<!-- Finis hthis -->
+`mcp` uses JAGS [@plummer2003] for inference and this is a notable deviation from other packages. Multiple change point problems with unknown parameters are analytically intractable ([@stephens1994; @carlin1992], but see [@jensen2013]). Therefore, change points are typically inferred using variations over two types of search algorithms:
+
+ * User-specified number of change points: iterate over possible locations of the $K$ change points and return the fit that minimizes the cost of the $K+1$ regression models.
+ 
+ * An unknown number of change points: Compute a statistic that is sensitive to changes. Return a change point every time the statistic passes a threshold. CUSUM [@page1954; @lee2003] is one such an algorithm which is sensitive to changes in the intercept.
+ 
+These procedures are practical and fast. However, their procedural nature also means that the statistical properties of the inferred change points are unknown and hence confidence intervals cannot readily be computed. One exception is the `segmented` package which implements a score-based confidence interval [@muggeo2017]. Care should be taken not to interpret frequentist intervals as a Bayesian posterior. The posteriors are often multi-modal and asymetric (see e.g. Figure \@ref(fig:pars), Figure \@ref(fig:allmodels) and [@raftery1986]). Therefore, simple intervals (whether frequentist or Bayesian) do not necessarily represent credible change point locations.
+
+Change points can be inferred using a Gibbs sampler (and later optimizations) in the absence of an analytical solution [@stephens1994; @carlin1992]. Since the advent of the BUGS language for Gibbs samplers in the 1990s [@lunn2012], Gibbs samplers have been used to identify change points in Generalized Linear Mixed Models (GLMM) and Time Series, among many others. I refer to[@stephens1994; @carlin1992] for a detailed exposition of how Gibbs samplers infer change points. 
+
+`mcp` uses JAGS [@plummer2003] but is built with an abstraction layer that represents the model in a sampler-agnostic way so that other samplers can easily be supported in the future. JAGS was chosen for the initial versions of `mcp` because sampling starts immediately, the install procedure is similar across operating systems, and the JAGS code is highly similar to R code, making it easier for R users to inspect and learn. `stan` [@carpenter2017] may be supported in the future since it is faster once the model has compiled and is expected to be superior for large datasets, complex models, and the Dirichlet prior.
+
+
+## Strengths
+The mcp website contains [a detailed comparison of R packages for multiple change point analysis](https://lindeloev.github.io/mcp/articles/packages.html), including `mcp`, `segmented` [@muggeo2008], `strucchange` [@zeileis2002, @zeileis2003], `ecp` [@james2015], `bcp` [@erdman2007], `changepoint` [@killick2014], `changepoint.np` [@haynes2019], `TSMCP` [@li2018], `cpm` [@ross2015], `EnvCpt` [@killick2018], `wbsts` [@korkas2018], and others.
+
+
+`mcp` is unique in the following ways: `mcp` supports a larger number of regression models while most packages model either (joined) slope changes or intercept-only changes. mcp allows regression models to differ between segments while other packages assume identical segment structures. `mcp` is the only package to model varying change points and to detect changes in autoregression. It is also the only package that can do regression on $\sigma$ (variance) and $\psi$ (autocorrelation) for change point problems. `mcp` is the only package to compute posteriors for the change points (and other parameters). Lastly, `mcp` can simulate data for all these models and directly assess parameter recovery.
+
+`mcp` provides many plot options and returns the plots as `ggplot2` objects so that the user can customize the plots further.
+
+`mcp` can include prior knowledge about individual parameters, model constant and identical coefficients (e.g., shared between segments), and do point-, directional-, and interval-tests on individual parameters. Because of this modeling flexibility, a greater number of models can be compared. Taken together, we may say that the strength of `mcp` is for *informed* analysis, i.e., when prior knowledge can be flexibly incorporated as specific model(s) or prior distributions on parameters.
+
+When applying all change point packages to a simple three-intercept problem, half of the packages found the two change points without quantifying uncertainty (`EnvCpt`, `strucchange::breakpoints`, `cpm`, `changepoint.np`, and `ecp::e.divisive`), while the other half did not recover them (`segmented`, `changepoint`, most methods in `ecp`, `TSMCP`, and `wbsts`).
+
+<!-- 
+Include a plot or something else here
+E.g., a plot with vertical lines for each package?
+-->
+
+`mcp` aims to be user-friendly. It includes more than 100 stop conditions with helpful error messages. For example, if JAGS throws an error (e.g., when the user-provided prior results in a directed cycle), this error is returned along with an empty `mcpfit` object containing the model code so that it can be inspected by the user. The test suite for `mcp` currently includes more than 1.700 tests that cover 88% of the code, reducing the chance that the end-user encounters a bug. 
+
+The source code is hosted on GitHub. It is less than 2.000 lines making `mcp` relatively lightweight to maintain, extend, and collaborate on.
+
+
+
+## Limitations
+Where `mcp` falls short, I find that `segmented`, `EnvCpt`, and `bcp` are recommendable packages if the data conforms to the smaller range of models supported by these packages.
+
+`mcp` cannot detect the number of change points in a dataset. `mcp` can use `loo` to compare N models, e.g., with $K = 1, 2, \ldots, N$ change points but this grows intractable for large $K$.
+
+Due to the order-restriction of the change point priors in `mcp`, each prior quickly becomes highly localized for larger $K$. Specifically, the posteriors may "shrink" towards these priors in undesirable ways if the data set is not large enough that the likelihood will dominate the prior, e.g., $K = 10$ for 100 data points. While `mcp` quantifies the credence that a *given* change point occurs at $x_i$, questions for large $K$ may better be posed as the credence that *any* change point occurs at $x_i$.
+
+`mcp` is the slowest of the reviewed packages and may be too computationally heavy for time-critical analyses of large datasets, e.g., 100.000 data points. To speed up inference, `mcp` supports parallel processing via the `future` and `future.apply` packages [@bengtsson2019]. Furthermore, fewer posterior samples are likely needed for large datasets.
+
+Lastly, `mcp` does not currently model multivariate data (`ecp`, `bcp`, or `TSMCP` are recommended). Furthermore, `mcp` does not currently support survival models, Moving-Average/ARIMA autocorrelation, or more than one predictor variable. `segmented` may be superior in these respects.
+
+
+
+# Conclusion
+`mcp` aims to fill in a missing piece in the change point world: flexible per-segment regression models with rich inference information. In concert with the packages doing automatic detection of the number of change points, along with more efficient (but also more limited) packages for a known number of change points, R users now have a great plethora of options that should cover most needs.
+
+
+
+
+
+
+# Appendix
+## Marginal Dirichlet Priors
+Before shifting and scaling, the prior for change point $k$ of total $K$ change points will correspond to:
+
+$$
+\Delta_k \sim {\rm Beta}(\sum_{z = 1}^K \alpha_z, \sum_{z=k+1}^{K+1} \alpha_z)
+$$
+
+When all $\mathbf{\alpha} = 1$, this simplifies to:
+
+$$
+\Delta_k \sim {\rm Beta}(k, K + 1 - k)
+$$
+
+
+
+##Likelihood for a multiple change point model
+Generalizing equation (\ref{eq-indicator}) from Carlin et al. (1992) to multiple change points and inserting (\ref{eq-indicator}) and (\ref{eq-localx}), we get the likelihood:
+
+$$
+\mathcal{L}(\mathbf{y}) = \prod_{k = 1}^K\prod_{i = \Delta_{k-1}}^{\Delta_k} [x_i > \Delta_k]\cdot P_k(\max\{x_i, \Delta_k\} - \Delta_{k-1}|\mathbf{\beta_k})
+$$
+where $P_k$ is the density associated with $f_k$ and the family in question (e.g., Gaussian or Binomial).
+
+
+
+# References

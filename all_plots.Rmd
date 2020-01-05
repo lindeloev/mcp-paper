@@ -1,0 +1,229 @@
+Make data and fits for all plots:
+
+```{r, echo = FALSE, message=FALSE, cache = TRUE}
+library(mcp)
+
+# Actually make the plots
+options(mc.cores = 3)
+
+
+# Two plateaus
+segments_plateaus = list(
+  y ~ 1,
+  ~ 1
+)
+fit_plateaus = mcp(segments_plateaus, ex_plateaus, par_x = "x")
+
+
+# Variance change
+segments_variance = list(
+  y ~ 1 + sigma(1),
+  ~ 0 + sigma(1)
+)
+
+empty_variance = mcp(segments_variance, sample = FALSE, par_x = "x")
+set.seed(42)
+data_variance = tibble::tibble(
+  x = 1:100,
+  y = empty_variance$simulate(
+    x = x,
+    cp_1 = 50, int_1 = 20, 
+    sigma_1 = 15, sigma_2 = 5
+  )
+)
+fit_variance = mcp(segments_variance, data_variance, par_x = "x")
+
+
+
+# AR(1) change
+segments_ar = list(
+  y ~ 1 + ar(1),
+  ~ 0 + ar(1)
+)
+empty_ar = mcp(segments_ar, sample = FALSE, par_x = "x")
+set.seed(42)
+data_ar = tibble::tibble(
+  x = 1:100,
+  y = empty_ar$simulate(
+    x = x,
+    cp_1 = 50, int_1 = 20,
+    ar1_1 = 0.9, ar1_2 = 0.2,
+    sigma_1 = 7
+  )
+)
+
+fit_ar = mcp(segments_ar, data_ar, par_x = "x")
+
+
+# Binomial
+segments_binomial = list(
+  y | trials(N) ~ 1,
+  ~ 0 + x,
+  ~ 1 + x
+)
+
+fit_binomial = mcp(segments_binomial, ex_binomial, family = binomial(), adapt = 4000)
+
+
+# Trigonometric / Seasonal
+segments_trig = list(
+  y ~ 1 + sin(x),
+  ~ 1 + cos(x) + x
+)
+
+fit_trig = mcp(segments_trig, ex_trig)
+
+
+# Varying change point
+segments_varying = list(
+  y ~ 1 + x,
+  1 + (1|id) ~ 0 + x
+)
+
+fit_varying = mcp(segments_varying, ex_varying)
+
+
+# All
+segments_all = list(
+  y ~ 1 + I(x^2) + sin(x) + sigma(1),
+  ~ 0 + ar(1) + sigma(1 + x),
+  ~ 0 + x + ar(1),
+  ~ 0
+)
+
+empty_all = mcp(segments_all, sample = FALSE)
+set.seed(42)
+data_all = tibble::tibble(
+  x = seq(1, 70, by = 0.5),
+  y = empty_all$simulate(
+    x = x,
+    cp_1 = 15, cp_2 = 40, cp_3 = 60,
+    int_1 = 20, 
+    x_1_E2 = 0.4, x_1_sin = 20, x_3 = -7,
+    sigma_1 = 8, sigma_2 = 45, sigma_x_2 = -1.1, 
+    ar1_2 = 0.2, ar1_3 = 0.7
+  )
+)
+
+prior_all = list(
+  cp_1 = "dt(0, 80/3, 1) T(10, )"  # A prior to prevent the first change point as being estimated at x = 0
+)
+
+fit_all = mcp(segments_all, data_all, prior_all)
+```
+
+
+Now make the individual plots:
+
+```{r, echo = FALSE}
+# Function to make plots
+library(ggplot2)
+make_plot = function(fit, segments, title, xcor, ycor, add_label = TRUE, ...) {
+  mcpplot = plot(fit, ...) + 
+    ggtitle(title) + 
+    coord_cartesian(ylim = NULL)
+  
+  if (add_label) {
+    mcpplot = mcpplot + geom_label(
+      hjust = 0, 
+      x = xcor, 
+      y = ycor, 
+      label = paste0(segments, collapse = "\n   "),
+      size = 4,
+      fill = "grey"
+    )
+  }
+  
+  return(mcpplot)
+}
+
+
+# Make the plots!
+plot_plateaus = make_plot(
+  fit_plateaus,
+  segments_plateaus, 
+  title = "Intercept", 
+  x = 10, y = 42,
+  q_fit = TRUE)
+
+plot_variance = make_plot(
+  fit_variance,
+  segments_variance, 
+  title = "Variance", 
+  x = 35, y = 45,
+  q_predict = TRUE)
+
+plot_ar = make_plot(
+  fit_ar,
+  segments_ar, 
+  title = "AR(1)",
+  x = 30, y = 55)
+
+plot_binomial = make_plot(
+  fit = fit_binomial,
+  segments_binomial, 
+  title = "Binomial (and other GLM)", 
+  x = 1, y = 0.4,
+  q_fit = TRUE)
+
+plot_trig = make_plot(
+  fit_trig,
+  segments_trig, 
+  data = ex_trig, 
+  title = "Seasonal/Trigonometric",
+  x = 2, y = 50)
+
+plot_varying = make_plot(
+  fit_varying,
+  segments_varying, 
+  cp_dens = FALSE,
+  title = "Varying change points", 
+  x = NA, y = NA, add_label = FALSE,
+  facet_by = "id")
+
+plot_label = ggplot(data.frame(x=NA, y = NA), aes(x=x, y=y)) + 
+  geom_point() + 
+  theme_classic() + 
+  theme(
+    axis.title = element_blank(),
+    axis.line = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text = element_blank()
+  ) + 
+  geom_label(
+    label = paste0(segments_varying, collapse = "\n"), 
+    fill = "gray", 
+    hjust = 0,
+    x = 0.4
+  )
+
+plot_all = make_plot(
+  fit_all,
+  segments_all, 
+  title = "Arbitrary models", 
+  xcor = 15, ycor = -45) + 
+  geom_vline(xintercept = c(15, 40, 60), lty = 2)
+
+```
+
+
+Finally, patchwork them together and save it to file
+
+```{r, echo = FALSE, fig.height=10, fig.width=7, message=FALSE, warning=FALSE}
+library(patchwork)
+# All together now via patchwork
+layout = "
+AABBCC
+DDDEEE
+FFFFGG
+HHHHHH
+"
+
+plot_plateaus + plot_variance + plot_ar +
+  plot_binomial + plot_trig + 
+  plot_varying + plot_label + 
+  plot_all +
+  plot_layout(design = layout)
+
+ggsave("all_plots.png", type = "cairo", scale = 1, width = 7, height = 10)
+```
