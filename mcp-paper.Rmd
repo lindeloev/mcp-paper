@@ -40,7 +40,7 @@ More than 10 R packages are available to analyze change points. Most packages de
 
 However, there are many cases where it is desirable to specify the regression models on a per-segment basis. More generally, the analyst will often have a priori knowledge about the number of change points and credible parameter values. For example, human short-term memory capacity can be modeled as a performance discontinuity in accuracy as a function of task difficulty [@cowan2000; @camos2008; @leibovich-raveh2018]. Performance is fast and virtually errorless for easy tasks (a high plateau), but there is an abrupt change to deteriorating accuracy (joined negative slope) when task difficulty exceeds the participant's abilities. Identification of the memory capacity has classically been done by eye-balling graphs or coming up with ad-hoc methods to automate this [@leibovich-raveh2018]. Similarly, the effects of many nutrients follow a positive quadratic trend with an exponent between 0 and 1, followed by a plateau at a saturation point [@pesti2009]. 
 
-In these cases, the number of change points is known, there are a priori bounds on the sign of the coefficients, and all parameters of the model are of interest - not just the change point. There may also be classical regression problems where change points are nuisance effects that need to be co-varied out, so detailed information and tests for *all* parameters (again, not just the change points) can also be useful. `mcp` aims to full in the missing piece in the R landscape by being useful for all of these purposes. More generally, `mcp` aims to do GLMM regression with multiple change points that change between user-specified GLMM segments, thus providing maximum modeling flexibility. `mcp` takes a Bayesian computational approach and, as we shall see, this has the added benefit of properly quantifying uncertainty around the change points - a seemingly impossible task for non-computational methods.
+In these cases, the number of change points is known, there are a priori bounds on the sign of the coefficients, and all parameters of the model are of interest - not just the change point. There may also be classical regression problems where change points are nuisance effects that need to be co-varied out, so detailed information and tests for *all* parameters (again, not just the change points) can also be useful. `mcp` aims to fill in these missing piecees in the R landscape. More generally, `mcp` aims to do GLMM regression with multiple change points that change between user-specified GLMM segments, thus providing maximum modeling flexibility. `mcp` takes a Bayesian computational approach and, as we shall see, this has the added benefit of properly quantifying uncertainty around the change points - a seemingly impossible task for non-computational methods.
 
 Part 1 of this paper introduces the regression model(s) underlying `mcp`. Part 2 discusses priors for change point models. Part 3 demonstrates the usage of `mcp` and it's features. Part 4 discusses the strengths and limitations of `mcp` in general, and in comparison to the other change point packages in R.
 
@@ -58,14 +58,14 @@ Let $\Delta$ be a location on the continuous scale $\mathbf{x}$ where the predic
     \end{cases}
 \end{equation}
 
-Each function $f$ takes the coefficients $\mathbf{\beta}$. For example, a linear segments is $f_k(x_i |  \mathbf{\beta_k}) = \beta_{k, 0} + \beta_{k, 1} \cdot x_i$. However, formulation (\ref{eq-ifelse}) does not readily generalize to $K$ segments, i.e., $K-1$ change points. In addition, time-series and other change point models are often joined at the change points, so a cumulative formulation would be desirable. The core novelty of `mcp` is to use an indicator formulation to achieve these goals:
+A linear segment is $f_k(x_i |  \mathbf{\beta_k}) = \beta_{k, 0} + \beta_{k, 1} \cdot x_i$. However, formulation (\ref{eq-ifelse}) does not readily generalize to $K$ segments, i.e., $K-1$ change points. In addition, time-series and other change point models are often joined at the change points, so a cumulative formulation would be desirable. `mcp` use an indicator formulation to achieve these goals:
 
 \begin{equation}
 \label{eq-indicator}
-\mu_i = \sum_{k=1}^{K} [x_i > \Delta_{k-1}]  f_k(X_{k, i} | \mathbf{\beta_k})
+\mu_i = \sum_{k=1}^{K+1} [x_i > \Delta_{k-1}]  f_k(X_{k, i} | \mathbf{\beta_k})
 \end{equation}
 
-The indicator function $[x_i > \Delta_{k-1}]$ evaluates to $1$ if true and $0$ if false [@knuth1992]. That is, for a given `x_i`, the parameters of the current and previous segments predict $\mu_i$ while future segments are multiplied by zero. The indicator can be ignored for the first segment ($k = 1$, corresponding to setting $\Delta_0 = -\infty$) or, as `mcp` defaults to, the change point can be restricted to the observed range of $\mathbf{x}$ by setting $\Delta_0 = \min(\mathbf{x})$. Also,
+The indicator function $[x_i > \Delta_{k-1}]$ evaluates to $1$ if true and $0$ if false [@knuth1992]. That is, for a given `x_i`, the parameters of the current and previous segments predict $\mu_i$ while future segments are multiplied by zero. The indicator can be ignored for the first segment (at $k = 1$, corresponding to setting $\Delta_0 = -\infty$) or, as `mcp` defaults to, the change point can be restricted to the observed range of $\mathbf{x}$ by setting $\Delta_0 = \min(\mathbf{x})$. Also,
 
 \begin{equation}
 \label{eq-localx}
@@ -74,7 +74,7 @@ X_{k,i} = \min\{x_i, \Delta_{k+1}\} - \Delta_{k}
 
 is the "local" $x_i$ to segment $k + 1$. It is zero at the segment onset (at $\Delta_k$) and reaches a plateau at the segment's offset(at $\Delta_{k+1}$). This allows for the modeling of joined segments, handing over the function value like a baton to the next segment. See appendix 2 for the associated likelihood.
 
-## Relative, absolute, and segment-specific models
+## Relative, absolute, and segment-specific terms
 Simple manipulations to this basic indicator scheme accommodates more flexible models.
 
 To model *relative* changes in slopes from segment $k$ to $k+1$, simply replace $\beta_{k+1, 1}$ with $\beta_{k, 1} + \beta_{k + 1, 1}$ so that $\beta_{k + 1, 1}$ is the *change* in slope. To model *absolute* intercepts in segment $k + 1$, simply multiply earlier segments with the additional indicator $[x_i < \Delta_k]$ which will "turn them off" because it evaluates to zero once $x_i$ crosses into segment $k + 1$.
@@ -130,16 +130,16 @@ y_i \sim & {\rm Normal}(\mu_i, \sigma_i)
 
 where, again, $\Delta_0 = -\infty$ or $\Delta_0 = \min(\mathbf{x})$. This means that we can easily model slopes on $\sigma_i$ as well as periodic (sine and cosine), quadratic, and other functions.
 
-Change point analysis is also frequently applied to time-series where the autocorrelation can be accounted for using Nth-order autoregressive parameters. In the context of regression, they apply to the residuals on the link scale ($g(y_i) - \mu_i$) predicting residual $i$ as a slope on residual $i-N$ for each N:
+Change point analysis is also frequently applied to time-series where the autocorrelation can be accounted for using Nth-order autoregressive parameters. In the context of regression, they apply to the residuals on the link scale ($g(y_i) - \mu_i$) predicting residual $i$ as a slope on residual $i-n$ for each `n = 1, 2, ..., N`:
 
 \begin{equation}
 \begin{aligned}
-  \epsilon_i & = \sum_{k=1}^{N} \phi_N(g(y_{i-N}) - \mu_{i-N}) \\
+  \epsilon_i & = \sum_{n=1}^{N} \phi_n(g(y_{i-n}) - \mu_{i-n}) \\
   y_i & = {\rm Normal}(\mu_i + \epsilon_i, \sigma_i)
 \end{aligned}
 \end{equation}
 
-We can subject each $\phi_N$ to the same regression as we did for $\mu$ and $\sigma$, making it a target for change points and flexible modeling. For AR(N) models, any variance parameter, $\sigma$, now represents the *innovations*, i.e., the variance not accounted for by $\epsilon_i$.
+We can subject each $\phi_n$ to the same regression as we did for $\mu$ and $\sigma$, making it a target for change points and flexible modeling. For AR(N) models, any variance parameter, $\sigma$, now represents the *innovations*, i.e., the variance not accounted for by $\epsilon_i$.
 
 
 ## Varying change points
@@ -165,7 +165,7 @@ Given a dataset with the response column `y` and the predictor column `x`, you c
 
 ```{r}
 model = list(
-  y ~ 1,        # Plateau
+  y ~ 1,          # Plateau
     ~ 0 + x,      # Joined slope
     ~ 1 + I(x^2)  # Disjoined quadratic
 )
@@ -177,7 +177,7 @@ With `lme4`, the syntax `y ~ \ldots + (formula|group)` was added for mixed model
 
 ```{r, eval=FALSE}
 model = list(
-  y ~ 1 + sigma(1),       # Plateau
+  y ~ 1 + sigma(1),         # Plateau
     ~ 0 + sigma(0 + x),     # Joined slope
     ~ 0 + sigma(1 + I(x^2)) # Disjoined quadratic
 )
@@ -241,16 +241,16 @@ which is identical to the Dirichlet prior for $K = 1$. For models with $K > 1$ a
 The t-tail prior is a series of t-distributions where ordering is imposed via left-truncation, i.e., leaving just the tails:
 
 \begin{equation}
-\Delta_k \sim t(\mu = 0, \sigma = \frac{1}{K}, \nu = K-1), \Delta_k \in (\Delta_{k-1}, 1)
+\Delta_k \sim t(\mu = 0, \sigma = \frac{1}{K}, \nu = K-1) \hspace{2em} where \hspace{2em} \Delta_{k-1} < \Delta_k < 1
 \end{equation}
 
 before scaling and $\Delta_0 = 0$. As $K$ increases, the degrees of freedoms $\nu$ increase and the variance $\sigma$ decreases to narrow the priors in a way that keeps the sum of the densities approximately flat. After shifting to start at $\min(\mathbf{x})$ and scaling to the range $\max(\mathbf{x}) - \min(\mathbf{x})$, we get
 
 \begin{equation}
-\Delta_k \sim t(\min(\mathbf{x}), \frac{\max(\mathbf{x}) - \min(\mathbf{x})}{K}, K-1), \Delta_k \in (\Delta_{k-1}, \max(\mathbf{x}))
+\Delta_k \sim t(\min(\mathbf{x}), \frac{\max(\mathbf{x}) - \min(\mathbf{x})}{K}, K-1) \hspace{2em} where \hspace{2em} \Delta_{k-1} < \Delta_k < \max(\mathbf{x})
 \end{equation}
 
-where $\Delta_0 = \min(\mathbf{x})$. While the t-distribution "base" is identical for all $\Delta_k$, the cumulative left-truncation(s) imposes a conditionality that make them differ. $\Delta_1$ is a half-t while $\Delta_{2+}$ are t-tails.
+and $\Delta_0 = \min(\mathbf{x})$. While the t-distribution "base" is identical for all $\Delta_k$, the cumulative left-truncation(s) imposes a conditionality that make them differ. $\Delta_1$ is a half-t while $\Delta_{2+}$ are t-tails.
 
 
 ### Priors for varying effects
@@ -261,8 +261,6 @@ The default prior for varying change points are normals that are truncated to li
 ## Default priors for other coefficients
 The default priors for intercepts and slopes in Gaussian families are normals that are vaguely based on data to ensure that they remain uninformative across any order of magnitude. They mimic the priors used in `brms` [@burkner2017].
 
-<!-- How to formally separate modeled y from observed y? -->
-
 For Gaussian families, the prior for the intercept is $t(0, 3* {\rm sd}(y), 3)$ and the prior for the slope is $t(0, {\rm sd}(y) / (\max(\mathbf{x}) - \min(\mathbf{x})), 3)$, i.e., a proportional *change* over the observed range of $\mathbf{x}$. The prior for $\sigma_1$s is $\mathcal{N}(0, {\rm sd}(y))$ truncated to positive values. A ${\rm Uniform}(-1, 1)$ prior is used on autoregressive coefficients to ensure stationarity [@fuller1981]. $\mathcal{N}(0, 10)$ is used for Poisson intercepts and slopes reflecting an expected value of 1 and a 68.3% prior credence counts between ${\rm exp}(-10) = 1 / 22026$ and ${\rm exp}(10) = 22026$ and likewise for the total *change* in counts over the observed range of $\mathbf{x}$. A $\mathcal{N}(0, 3)$ is used for Bernoulli and binomial intercepts on a logit scale reflecting 68.3% prior credence in probabilities between 4.7% and 95.3%, and $\mathcal{N}(0, 3 / (\max(\mathbf{x}) - \min(\mathbf{x}))$ for slopes reflecting similar prior credence for the *change* in probabilities over the observed $\mathbf{x}$.
 
 
@@ -271,9 +269,9 @@ Users can specify priors using named lists. The names are the parameter names an
 
 ```{r}
 prior = list(
-  cp_1 = "dunif(10, 50)",
-  x_2 = "dnorm(0, 3) T(0, )",
-  int_3 = "int_1"
+  cp_1 = "dunif(10, 50)",      # ("Bounded") uniform
+  x_2 = "dnorm(0, 3) T(0, )",  # Positive half-normal
+  int_3 = "int_1"              # Identity
 )
 ```
 
@@ -339,12 +337,11 @@ The `plot()` function visualizes the inferred model (see Figure \@ref(fig:fitpos
 (ref:fitpostprior) Prior predictive and posterior fits pertaining to the model specified in [this section](#segments_api) (see also (\ref{eq-model})), plotted using `plot()`. **Left:** Raw data (points, simulated in the main text) with 25 draws from the joint posterior (grey lines) and 95% highest density interval (dashed red lines). Posterior distributions of the change points are shown in blue - one line for each chain. **Right:** The same as left, but for prior samples and with a 60% prediction interval (green lines). Note that the uniform prior on the first change point was set manually in [the section on the prior API](#priors_api) and is not an mcp default.
 
 ```{r fitpostprior, fig.cap="(ref:fitpostprior)"}
-library(ggplot2)
 plot(fit, q_fit = TRUE) + 
-  ggtitle("Posterior fit") +
+  ggplot2::ggtitle("Posterior fit") +
   
 plot(fit_prior, lines = 0, prior = TRUE, q_predict = c(0.2, 0.8)) + 
-  ggtitle("Prior predictive")
+  ggplot2::ggtitle("Prior predictive")
 ```
 
 
@@ -499,24 +496,28 @@ Lastly, `mcp` does not currently model multivariate data (`ecp`, `bcp`, or `TSMC
 ## Marginal Dirichlet Priors
 Before shifting and scaling, the prior for change point $k$ of total $K$ change points will correspond to:
 
-$$
+\begin{equation}
 \Delta_k \sim {\rm Beta}(\sum_{z = 1}^K \alpha_z, \sum_{z=k+1}^{K+1} \alpha_z)
-$$
+\end{equation}
 
 When all $\mathbf{\alpha} = 1$, this simplifies to:
 
-$$
+\begin{equation}
 \Delta_k \sim {\rm Beta}(k, K + 1 - k)
-$$
+\end{equation}
 
 
 
-##Likelihood for a multiple change point model
+## The Likelihood for a multiple change point model
 Generalizing equation (\ref{eq-indicator}) from Carlin et al. (1992) to multiple change points and inserting (\ref{eq-indicator}) and (\ref{eq-localx}), we get the likelihood:
 
-$$
-\mathcal{L}(\mathbf{y}) = \prod_{k = 1}^K\prod_{i = \Delta_{k-1}}^{\Delta_k} [x_i > \Delta_k]\cdot P_k(\max\{x_i, \Delta_k\} - \Delta_{k-1}|\mathbf{\beta_k})
-$$
+\begin{equation}
+\begin{aligned}
+\mathcal{L}(\mathbf{y}) & = \prod_{k = 1}^K\prod_{i = \Delta_{k-1}}^{\Delta_k} [x_i > \Delta_k]\cdot P_k(X_{k, i}|\mathbf{\beta_k}) \\
+                        & = \prod_{k = 1}^K\prod_{i = \Delta_{k-1}}^{\Delta_k} [x_i > \Delta_k]\cdot P_k(\max\{x_i, \Delta_k\} - \Delta_{k-1}|\mathbf{\beta_k})
+\end{aligned}
+\end{equation}
+
 where $P_k$ is the density associated with $f_k$ and the family in question (e.g., Gaussian or Binomial).
 
 

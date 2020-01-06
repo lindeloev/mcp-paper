@@ -153,7 +153,7 @@ More than 10 R packages are available to analyze change points. Most packages de
 
 However, there are many cases where it is desirable to specify the regression models on a per-segment basis. More generally, the analyst will often have a priori knowledge about the number of change points and credible parameter values. For example, human short-term memory capacity can be modeled as a performance discontinuity in accuracy as a function of task difficulty \citep{cowan2000, camos2008, leibovich-raveh2018}. Performance is fast and virtually errorless for easy tasks (a high plateau), but there is an abrupt change to deteriorating accuracy (joined negative slope) when task difficulty exceeds the participant's abilities. Identification of the memory capacity has classically been done by eye-balling graphs or coming up with ad-hoc methods to automate this \citep{leibovich-raveh2018}. Similarly, the effects of many nutrients follow a positive quadratic trend with an exponent between 0 and 1, followed by a plateau at a saturation point \citep{pesti2009}.
 
-In these cases, the number of change points is known, there are a priori bounds on the sign of the coefficients, and all parameters of the model are of interest - not just the change point. There may also be classical regression problems where change points are nuisance effects that need to be co-varied out, so detailed information and tests for \emph{all} parameters (again, not just the change points) can also be useful. \texttt{mcp} aims to full in the missing piece in the R landscape by being useful for all of these purposes. More generally, \texttt{mcp} aims to do GLMM regression with multiple change points that change between user-specified GLMM segments, thus providing maximum modeling flexibility. \texttt{mcp} takes a Bayesian computational approach and, as we shall see, this has the added benefit of properly quantifying uncertainty around the change points - a seemingly impossible task for non-computational methods.
+In these cases, the number of change points is known, there are a priori bounds on the sign of the coefficients, and all parameters of the model are of interest - not just the change point. There may also be classical regression problems where change points are nuisance effects that need to be co-varied out, so detailed information and tests for \emph{all} parameters (again, not just the change points) can also be useful. \texttt{mcp} aims to fill in these missing piecees in the R landscape. More generally, \texttt{mcp} aims to do GLMM regression with multiple change points that change between user-specified GLMM segments, thus providing maximum modeling flexibility. \texttt{mcp} takes a Bayesian computational approach and, as we shall see, this has the added benefit of properly quantifying uncertainty around the change points - a seemingly impossible task for non-computational methods.
 
 Part 1 of this paper introduces the regression model(s) underlying \texttt{mcp}. Part 2 discusses priors for change point models. Part 3 demonstrates the usage of \texttt{mcp} and it's features. Part 4 discusses the strengths and limitations of \texttt{mcp} in general, and in comparison to the other change point packages in R.
 
@@ -173,14 +173,14 @@ Let \(\Delta\) be a location on the continuous scale \(\mathbf{x}\) where the pr
     \end{cases}
 \end{equation}
 
-Each function \(f\) takes the coefficients \(\mathbf{\beta}\). For example, a linear segments is \(f_k(x_i | \mathbf{\beta_k}) = \beta_{k, 0} + \beta_{k, 1} \cdot x_i\). However, formulation (\ref{eq-ifelse}) does not readily generalize to \(K\) segments, i.e., \(K-1\) change points. In addition, time-series and other change point models are often joined at the change points, so a cumulative formulation would be desirable. The core novelty of \texttt{mcp} is to use an indicator formulation to achieve these goals:
+A linear segment is \(f_k(x_i | \mathbf{\beta_k}) = \beta_{k, 0} + \beta_{k, 1} \cdot x_i\). However, formulation (\ref{eq-ifelse}) does not readily generalize to \(K\) segments, i.e., \(K-1\) change points. In addition, time-series and other change point models are often joined at the change points, so a cumulative formulation would be desirable. \texttt{mcp} use an indicator formulation to achieve these goals:
 
 \begin{equation}
 \label{eq-indicator}
-\mu_i = \sum_{k=1}^{K} [x_i > \Delta_{k-1}]  f_k(X_{k, i} | \mathbf{\beta_k})
+\mu_i = \sum_{k=1}^{K+1} [x_i > \Delta_{k-1}]  f_k(X_{k, i} | \mathbf{\beta_k})
 \end{equation}
 
-The indicator function \([x_i > \Delta_{k-1}]\) evaluates to \(1\) if true and \(0\) if false \citep{knuth1992}. That is, for a given \texttt{x\_i}, the parameters of the current and previous segments predict \(\mu_i\) while future segments are multiplied by zero. The indicator can be ignored for the first segment (\(k = 1\), corresponding to setting \(\Delta_0 = -\infty\)) or, as \texttt{mcp} defaults to, the change point can be restricted to the observed range of \(\mathbf{x}\) by setting \(\Delta_0 = \min(\mathbf{x})\). Also,
+The indicator function \([x_i > \Delta_{k-1}]\) evaluates to \(1\) if true and \(0\) if false \citep{knuth1992}. That is, for a given \texttt{x\_i}, the parameters of the current and previous segments predict \(\mu_i\) while future segments are multiplied by zero. The indicator can be ignored for the first segment (at \(k = 1\), corresponding to setting \(\Delta_0 = -\infty\)) or, as \texttt{mcp} defaults to, the change point can be restricted to the observed range of \(\mathbf{x}\) by setting \(\Delta_0 = \min(\mathbf{x})\). Also,
 
 \begin{equation}
 \label{eq-localx}
@@ -189,8 +189,8 @@ X_{k,i} = \min\{x_i, \Delta_{k+1}\} - \Delta_{k}
 
 is the ``local'' \(x_i\) to segment \(k + 1\). It is zero at the segment onset (at \(\Delta_k\)) and reaches a plateau at the segment's offset(at \(\Delta_{k+1}\)). This allows for the modeling of joined segments, handing over the function value like a baton to the next segment. See appendix 2 for the associated likelihood.
 
-\hypertarget{relative-absolute-and-segment-specific-models}{%
-\subsection{Relative, absolute, and segment-specific models}\label{relative-absolute-and-segment-specific-models}}
+\hypertarget{relative-absolute-and-segment-specific-terms}{%
+\subsection{Relative, absolute, and segment-specific terms}\label{relative-absolute-and-segment-specific-terms}}
 
 Simple manipulations to this basic indicator scheme accommodates more flexible models.
 
@@ -247,16 +247,16 @@ y_i \sim & {\rm Normal}(\mu_i, \sigma_i)
 
 where, again, \(\Delta_0 = -\infty\) or \(\Delta_0 = \min(\mathbf{x})\). This means that we can easily model slopes on \(\sigma_i\) as well as periodic (sine and cosine), quadratic, and other functions.
 
-Change point analysis is also frequently applied to time-series where the autocorrelation can be accounted for using Nth-order autoregressive parameters. In the context of regression, they apply to the residuals on the link scale (\(g(y_i) - \mu_i\)) predicting residual \(i\) as a slope on residual \(i-N\) for each N:
+Change point analysis is also frequently applied to time-series where the autocorrelation can be accounted for using Nth-order autoregressive parameters. In the context of regression, they apply to the residuals on the link scale (\(g(y_i) - \mu_i\)) predicting residual \(i\) as a slope on residual \(i-n\) for each \texttt{n\ =\ 1,\ 2,\ ...,\ N}:
 
 \begin{equation}
 \begin{aligned}
-  \epsilon_i & = \sum_{k=1}^{N} \phi_N(g(y_{i-N}) - \mu_{i-N}) \\
+  \epsilon_i & = \sum_{n=1}^{N} \phi_n(g(y_{i-n}) - \mu_{i-n}) \\
   y_i & = {\rm Normal}(\mu_i + \epsilon_i, \sigma_i)
 \end{aligned}
 \end{equation}
 
-We can subject each \(\phi_N\) to the same regression as we did for \(\mu\) and \(\sigma\), making it a target for change points and flexible modeling. For AR(N) models, any variance parameter, \(\sigma\), now represents the \emph{innovations}, i.e., the variance not accounted for by \(\epsilon_i\).
+We can subject each \(\phi_n\) to the same regression as we did for \(\mu\) and \(\sigma\), making it a target for change points and flexible modeling. For AR(N) models, any variance parameter, \(\sigma\), now represents the \emph{innovations}, i.e., the variance not accounted for by \(\epsilon_i\).
 
 \hypertarget{varying-change-points}{%
 \subsection{Varying change points}\label{varying-change-points}}
@@ -285,7 +285,7 @@ Given a dataset with the response column \texttt{y} and the predictor column \te
 \begin{Shaded}
 \begin{Highlighting}[]
 \NormalTok{model =}\StringTok{ }\KeywordTok{list}\NormalTok{(}
-\NormalTok{  y }\OperatorTok{~}\StringTok{ }\DecValTok{1}\NormalTok{,        }\CommentTok{# Plateau}
+\NormalTok{  y }\OperatorTok{~}\StringTok{ }\DecValTok{1}\NormalTok{,          }\CommentTok{# Plateau}
     \OperatorTok{~}\StringTok{ }\DecValTok{0} \OperatorTok{+}\StringTok{ }\NormalTok{x,      }\CommentTok{# Joined slope}
     \OperatorTok{~}\StringTok{ }\DecValTok{1} \OperatorTok{+}\StringTok{ }\KeywordTok{I}\NormalTok{(x}\OperatorTok{^}\DecValTok{2}\NormalTok{)  }\CommentTok{# Disjoined quadratic}
 \NormalTok{)}
@@ -299,7 +299,7 @@ With \texttt{lme4}, the syntax \texttt{y\ \textasciitilde{}\ \textbackslash{}ldo
 \begin{Shaded}
 \begin{Highlighting}[]
 \NormalTok{model =}\StringTok{ }\KeywordTok{list}\NormalTok{(}
-\NormalTok{  y }\OperatorTok{~}\StringTok{ }\DecValTok{1} \OperatorTok{+}\StringTok{ }\KeywordTok{sigma}\NormalTok{(}\DecValTok{1}\NormalTok{),       }\CommentTok{# Plateau}
+\NormalTok{  y }\OperatorTok{~}\StringTok{ }\DecValTok{1} \OperatorTok{+}\StringTok{ }\KeywordTok{sigma}\NormalTok{(}\DecValTok{1}\NormalTok{),         }\CommentTok{# Plateau}
     \OperatorTok{~}\StringTok{ }\DecValTok{0} \OperatorTok{+}\StringTok{ }\KeywordTok{sigma}\NormalTok{(}\DecValTok{0} \OperatorTok{+}\StringTok{ }\NormalTok{x),     }\CommentTok{# Joined slope}
     \OperatorTok{~}\StringTok{ }\DecValTok{0} \OperatorTok{+}\StringTok{ }\KeywordTok{sigma}\NormalTok{(}\DecValTok{1} \OperatorTok{+}\StringTok{ }\KeywordTok{I}\NormalTok{(x}\OperatorTok{^}\DecValTok{2}\NormalTok{)) }\CommentTok{# Disjoined quadratic}
 \NormalTok{)}
@@ -371,16 +371,16 @@ which is identical to the Dirichlet prior for \(K = 1\). For models with \(K > 1
 The t-tail prior is a series of t-distributions where ordering is imposed via left-truncation, i.e., leaving just the tails:
 
 \begin{equation}
-\Delta_k \sim t(\mu = 0, \sigma = \frac{1}{K}, \nu = K-1), \Delta_k \in (\Delta_{k-1}, 1)
+\Delta_k \sim t(\mu = 0, \sigma = \frac{1}{K}, \nu = K-1) \hspace{2em} where \hspace{2em} \Delta_{k-1} < \Delta_k < 1
 \end{equation}
 
 before scaling and \(\Delta_0 = 0\). As \(K\) increases, the degrees of freedoms \(\nu\) increase and the variance \(\sigma\) decreases to narrow the priors in a way that keeps the sum of the densities approximately flat. After shifting to start at \(\min(\mathbf{x})\) and scaling to the range \(\max(\mathbf{x}) - \min(\mathbf{x})\), we get
 
 \begin{equation}
-\Delta_k \sim t(\min(\mathbf{x}), \frac{\max(\mathbf{x}) - \min(\mathbf{x})}{K}, K-1), \Delta_k \in (\Delta_{k-1}, \max(\mathbf{x}))
+\Delta_k \sim t(\min(\mathbf{x}), \frac{\max(\mathbf{x}) - \min(\mathbf{x})}{K}, K-1) \hspace{2em} where \hspace{2em} \Delta_{k-1} < \Delta_k < \max(\mathbf{x})
 \end{equation}
 
-where \(\Delta_0 = \min(\mathbf{x})\). While the t-distribution ``base'' is identical for all \(\Delta_k\), the cumulative left-truncation(s) imposes a conditionality that make them differ. \(\Delta_1\) is a half-t while \(\Delta_{2+}\) are t-tails.
+and \(\Delta_0 = \min(\mathbf{x})\). While the t-distribution ``base'' is identical for all \(\Delta_k\), the cumulative left-truncation(s) imposes a conditionality that make them differ. \(\Delta_1\) is a half-t while \(\Delta_{2+}\) are t-tails.
 
 \hypertarget{priors-for-varying-effects}{%
 \subsubsection{Priors for varying effects}\label{priors-for-varying-effects}}
@@ -402,9 +402,9 @@ Users can specify priors using named lists. The names are the parameter names an
 \begin{Shaded}
 \begin{Highlighting}[]
 \NormalTok{prior =}\StringTok{ }\KeywordTok{list}\NormalTok{(}
-  \DataTypeTok{cp_1 =} \StringTok{"dunif(10, 50)"}\NormalTok{,}
-  \DataTypeTok{x_2 =} \StringTok{"dnorm(0, 3) T(0, )"}\NormalTok{,}
-  \DataTypeTok{int_3 =} \StringTok{"int_1"}
+  \DataTypeTok{cp_1 =} \StringTok{"dunif(10, 50)"}\NormalTok{,      }\CommentTok{# ("Bounded") uniform}
+  \DataTypeTok{x_2 =} \StringTok{"dnorm(0, 3) T(0, )"}\NormalTok{,  }\CommentTok{# Positive half-normal}
+  \DataTypeTok{int_3 =} \StringTok{"int_1"}              \CommentTok{# Identity}
 \NormalTok{)}
 \end{Highlighting}
 \end{Shaded}
@@ -478,12 +478,11 @@ The \texttt{plot()} function visualizes the inferred model (see Figure \ref{fig:
 
 \begin{Shaded}
 \begin{Highlighting}[]
-\KeywordTok{library}\NormalTok{(ggplot2)}
 \KeywordTok{plot}\NormalTok{(fit, }\DataTypeTok{q_fit =} \OtherTok{TRUE}\NormalTok{) }\OperatorTok{+}\StringTok{ }
-\StringTok{  }\KeywordTok{ggtitle}\NormalTok{(}\StringTok{"Posterior fit"}\NormalTok{) }\OperatorTok{+}
+\StringTok{  }\NormalTok{ggplot2}\OperatorTok{::}\KeywordTok{ggtitle}\NormalTok{(}\StringTok{"Posterior fit"}\NormalTok{) }\OperatorTok{+}
 \StringTok{  }
 \KeywordTok{plot}\NormalTok{(fit_prior, }\DataTypeTok{lines =} \DecValTok{0}\NormalTok{, }\DataTypeTok{prior =} \OtherTok{TRUE}\NormalTok{, }\DataTypeTok{q_predict =} \KeywordTok{c}\NormalTok{(}\FloatTok{0.2}\NormalTok{, }\FloatTok{0.8}\NormalTok{)) }\OperatorTok{+}\StringTok{ }
-\StringTok{  }\KeywordTok{ggtitle}\NormalTok{(}\StringTok{"Prior predictive"}\NormalTok{)}
+\StringTok{  }\NormalTok{ggplot2}\OperatorTok{::}\KeywordTok{ggtitle}\NormalTok{(}\StringTok{"Prior predictive"}\NormalTok{)}
 \end{Highlighting}
 \end{Shaded}
 
@@ -682,22 +681,28 @@ Lastly, \texttt{mcp} does not currently model multivariate data (\texttt{ecp}, \
 
 Before shifting and scaling, the prior for change point \(k\) of total \(K\) change points will correspond to:
 
-\[
+\begin{equation}
 \Delta_k \sim {\rm Beta}(\sum_{z = 1}^K \alpha_z, \sum_{z=k+1}^{K+1} \alpha_z)
-\]
+\end{equation}
 
 When all \(\mathbf{\alpha} = 1\), this simplifies to:
 
-\[
+\begin{equation}
 \Delta_k \sim {\rm Beta}(k, K + 1 - k)
-\]
+\end{equation}
 
-\#\#Likelihood for a multiple change point model
+\hypertarget{the-likelihood-for-a-multiple-change-point-model}{%
+\subsection{The Likelihood for a multiple change point model}\label{the-likelihood-for-a-multiple-change-point-model}}
+
 Generalizing equation (\ref{eq-indicator}) from Carlin et al.~(1992) to multiple change points and inserting (\ref{eq-indicator}) and (\ref{eq-localx}), we get the likelihood:
 
-\[
-\mathcal{L}(\mathbf{y}) = \prod_{k = 1}^K\prod_{i = \Delta_{k-1}}^{\Delta_k} [x_i > \Delta_k]\cdot P_k(\max\{x_i, \Delta_k\} - \Delta_{k-1}|\mathbf{\beta_k})
-\]
+\begin{equation}
+\begin{aligned}
+\mathcal{L}(\mathbf{y}) & = \prod_{k = 1}^K\prod_{i = \Delta_{k-1}}^{\Delta_k} [x_i > \Delta_k]\cdot P_k(X_{k, i}|\mathbf{\beta_k}) \\
+                        & = \prod_{k = 1}^K\prod_{i = \Delta_{k-1}}^{\Delta_k} [x_i > \Delta_k]\cdot P_k(\max\{x_i, \Delta_k\} - \Delta_{k-1}|\mathbf{\beta_k})
+\end{aligned}
+\end{equation}
+
 where \(P_k\) is the density associated with \(f_k\) and the family in question (e.g., Gaussian or Binomial).
 
 \renewcommand\refname{References}
